@@ -4,6 +4,8 @@
 
 -define(PORT, 5555).
 
+-define(OBSTACLES, [{9,3},{8,3},{7,3},{7,2}]).
+
 
 start() ->
     robo_mnesia:start(),
@@ -177,7 +179,7 @@ handle_request(Socket, {register, RobotId, Current, Goal}) ->
       "Registering robot ~p: ~p -> ~p~n",
       [RobotId, Current, Goal]),
 
-    Obstacles = [],
+    Obstacles = ?OBSTACLES,
 
     case robo_pathfinder:find_path(
            Current,
