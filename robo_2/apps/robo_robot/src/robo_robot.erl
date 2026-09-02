@@ -1,53 +1,46 @@
 -module(robo_robot).
 
--export([start/3,run/2]).
+-export([start/3, run/2]).
 
 -define(SERVER, "localhost").
--define(PORT, 5555).
+-define(PORT,   5555).
+
 
 start(RobotId, Current, Goal) ->
     io:format(
-        "Robot ~p starting at ~p, goal: ~p~n",
-        [RobotId, Current, Goal]
-    ),
+      "Robot ~p starting at ~p, goal: ~p~n",
+      [RobotId, Current, Goal]),
 
     {ok, Socket} = gen_tcp:connect(
-        ?SERVER,
-        ?PORT,
-        [
-            binary,
-            {packet, 4},
-            {active, false}
-        ]
-    ),
+                     ?SERVER,
+                     ?PORT,
+                     [binary,
+                      {packet, 4},
+                      {active, false}]),
 
     io:format("Robot ~p connected to server~n", [RobotId]),
 
     Request = {register, RobotId, Current, Goal},
 
     gen_tcp:send(
-        Socket,
-        term_to_binary(Request)
-    ),
+      Socket,
+      term_to_binary(Request)),
 
     {ok, Data} = gen_tcp:recv(Socket, 0),
 
     Response = binary_to_term(Data),
 
     io:format(
-        "Robot ~p received: ~p~n",
-        [RobotId, Response]
-    ),
+      "Robot ~p received: ~p~n",
+      [RobotId, Response]),
 
     Socket.
 
 
-
 run(Socket, RobotId) ->
     gen_tcp:send(
-        Socket,
-        term_to_binary({request_window, RobotId})
-    ),
+      Socket,
+      term_to_binary({request_window, RobotId})),
 
     {ok, Data} = gen_tcp:recv(Socket, 0),
 
@@ -59,17 +52,14 @@ run(Socket, RobotId) ->
 
         {window_denied, Reason} ->
             io:format(
-                "Robot ~p window denied: ~p~n",
-                [RobotId, Reason]
-            );
+              "Robot ~p window denied: ~p~n",
+              [RobotId, Reason]);
 
         Other ->
             io:format(
-                "Robot ~p received unexpected response: ~p~n",
-                [RobotId, Other]
-            )
+              "Robot ~p received unexpected response: ~p~n",
+              [RobotId, Other])
     end.
-
 
 
 move_window(_Socket, _RobotId, []) ->
@@ -77,44 +67,39 @@ move_window(_Socket, _RobotId, []) ->
 
 move_window(Socket, RobotId, [Position | Rest]) ->
     io:format(
-        "Robot ~p moving to ~p~n",
-        [RobotId, Position]
-    ),
+      "Robot ~p moving to ~p~n",
+      [RobotId, Position]),
 
     gen_tcp:send(
-        Socket,
-        term_to_binary(
-            {moved, RobotId, Position}
-        )
-    ),
+      Socket,
+      term_to_binary(
+        {moved, RobotId, Position})),
 
     {ok, Data} = gen_tcp:recv(Socket, 0),
 
     Response = binary_to_term(Data),
 
     io:format(
-        "Robot ~p received: ~p~n",
-        [RobotId, Response]
-    ),
+      "Robot ~p received: ~p~n",
+      [RobotId, Response]),
 
     case Response of
         {move_ack, Position} ->
-            move_window(
-                Socket,
-                RobotId,
-                Rest
-            );
+            move_window(Socket, RobotId, Rest);
+
+        {goal_reached, Position} ->
+            io:format(
+              "Robot ~p reached its goal at ~p.~n",
+              [RobotId, Position]),
+            ok;
 
         {move_denied, Reason} ->
             io:format(
-                "Move denied: ~p~n",
-                [Reason]
-            );
+              "Move denied: ~p~n",
+              [Reason]);
 
         Other ->
             io:format(
-                "Unexpected response: ~p~n",
-                [Other]
-            )
+              "Unexpected response: ~p~n",
+              [Other])
     end.
-

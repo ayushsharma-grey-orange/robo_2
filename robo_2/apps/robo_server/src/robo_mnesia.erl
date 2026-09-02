@@ -10,7 +10,9 @@
     reserve_barcode/2,
     release_barcode/1,
     get_next_window/2,
-    move_robot/2
+    move_robot/2,
+    get_all_reservations/0,
+    cleanup_robot/1
 ]).
 
 -record(robot, {
@@ -154,6 +156,54 @@ get_next_window(RobotId, WindowSize) ->
     end).
 
 
+next_position(Current, Path) ->
+    case lists:dropwhile(
+        fun(Position) -> Position =/= Current end,
+        Path
+    ) of
+        [_Current, Next | _] ->
+            {ok, Next};
+
+        [_Current] ->
+            {error, goal_reached};
+
+        [] ->
+            {error, current_position_not_in_path}
+    end.
+
+
+check_and_move_robot(Robot, NewPosition, Goal) ->
+    RobotId = Robot#robot.id,
+
+    case mnesia:read(reservation, NewPosition, write) of
+        [{reservation, NewPosition, RobotId}] ->
+
+            case NewPosition =:= Goal of
+                true ->
+                    mnesia:delete({reservation, NewPosition}),
+                    mnesia:delete({robot, RobotId}),
+                    {ok, goal_reached};
+
+                false ->
+                    UpdatedRobot =
+                        Robot#robot{
+                            current = NewPosition
+                        },
+
+                    mnesia:write(UpdatedRobot),
+                    mnesia:delete({reservation, NewPosition}),
+
+                    {ok, moved}
+            end;
+
+        [{reservation, NewPosition, OtherRobot}] ->
+            {error, {position_reserved_by, OtherRobot}};
+
+        [] ->
+            {error, position_not_reserved}
+    end.
+
+
 next_positions(Current, Path, WindowSize) ->
     case lists:dropwhile(
         fun(Position) ->
@@ -202,6 +252,45 @@ reserve_positions(
             {error, Barcode}
     end.
 
+% move_robot(RobotId, NewPosition) ->
+%     mnesia:transaction(fun() ->
+%         case mnesia:read(robot, RobotId, write) of
+%             [] ->
+%                 {error, robot_not_found};
+
+%             [Robot] ->
+%                 case mnesia:read(
+%                     reservation,
+%                     NewPosition,
+%                     write
+%                 ) of
+
+%                     [{reservation, NewPosition, RobotId}] ->
+%                         UpdatedRobot = Robot#robot{
+%                             current = NewPosition
+%                         },
+
+%                         mnesia:write(UpdatedRobot),
+
+%                         mnesia:delete({
+%                             reservation,
+%                             NewPosition
+%                         }),
+
+%                         ok;
+
+%                     [{reservation, NewPosition, OtherRobot}] ->
+%                         {error, {
+%                             position_reserved_by,
+%                             OtherRobot
+%                         }};
+
+%                     [] ->
+%                         {error, position_not_reserved}
+%                 end
+%         end
+%     end).
+
 move_robot(RobotId, NewPosition) ->
     mnesia:transaction(fun() ->
         case mnesia:read(robot, RobotId, write) of
@@ -209,34 +298,56 @@ move_robot(RobotId, NewPosition) ->
                 {error, robot_not_found};
 
             [Robot] ->
-                case mnesia:read(
-                    reservation,
-                    NewPosition,
-                    write
-                ) of
+                Current = Robot#robot.current,
+                Goal = Robot#robot.goal,
+                Path = Robot#robot.path,
 
-                    [{reservation, NewPosition, RobotId}] ->
-                        UpdatedRobot = Robot#robot{
-                            current = NewPosition
-                        },
+                case next_position(Current, Path) of
+                    {ok, NewPosition} ->
+                        check_and_move_robot(
+                            Robot,
+                            NewPosition,
+                            Goal
+                        );
 
-                        mnesia:write(UpdatedRobot),
+                    {ok, ExpectedPosition} ->
+                        {error, {unexpected_position, ExpectedPosition}};
 
-                        mnesia:delete({
-                            reservation,
-                            NewPosition
-                        }),
-
-                        ok;
-
-                    [{reservation, NewPosition, OtherRobot}] ->
-                        {error, {
-                            position_reserved_by,
-                            OtherRobot
-                        }};
-
-                    [] ->
-                        {error, position_not_reserved}
+                    {error, Reason} ->
+                        {error, Reason}
                 end
         end
     end).
+
+
+cleanup_robot(RobotId) ->
+    mnesia:transaction(fun() ->
+        mnesia:delete({robot, RobotId}),
+
+        Reservations =
+            mnesia:match_object(
+                #reservation{
+                    barcode = '_',
+                    robot_id = RobotId
+                }
+            ),
+
+        lists:foreach(
+            fun(#reservation{barcode = Barcode}) ->
+                mnesia:delete({reservation, Barcode})
+            end,
+            Reservations
+        ),
+
+        ok
+    end).
+
+
+get_all_reservations() ->
+    F = fun() ->
+        mnesia:match_object(#reservation{_ = '_'})
+    end,
+    case mnesia:transaction(F) of
+        {atomic, Records} -> Records;
+        {aborted, Reason} -> {error, Reason}
+    end.

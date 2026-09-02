@@ -4,17 +4,15 @@
 
 -define(PORT, 5555).
 
+
 start() ->
     robo_mnesia:start(),
     {ok, ListenSocket} = gen_tcp:listen(
-        ?PORT,
-        [
-            binary,
-            {packet, 4},
-            {active, false},
-            {reuseaddr, true}
-        ]
-    ),
+                           ?PORT,
+                           [binary,
+                            {packet, 4},
+                            {active, false},
+                            {reuseaddr, true}]),
 
     io:format("Server listening on port ~p~n", [?PORT]),
 
@@ -43,7 +41,7 @@ handle_robot(Socket) ->
             handle_robot(Socket);
 
         {error, closed} ->
-            io:format("Robot disconnected~n"),
+            io:format("~n~nRobot disconnected~n~n"),
 
             gen_tcp:close(Socket)
     end.
@@ -53,9 +51,8 @@ handle_request(Socket, {hello, RobotId}) ->
     Response = {hello_ack, RobotId},
 
     gen_tcp:send(
-        Socket,
-        term_to_binary(Response)
-    );
+      Socket,
+      term_to_binary(Response));
 
 % handle_request(Socket, {register, RobotId, Current, Goal}) ->
 %     io:format(
@@ -95,125 +92,125 @@ handle_request(Socket, {hello, RobotId}) ->
 %         Socket,
 %         term_to_binary(Response)
 %     );
-handle_request(
-    Socket,
-    {moved, RobotId, NewPosition}
-) ->
+% handle_request(Socket,
+%                {moved, RobotId, NewPosition}) ->
+%     io:format(
+%       "Robot ~p moved to ~p~n",
+%       [RobotId, NewPosition]),
+
+%     case robo_mnesia:move_robot(
+%            RobotId,
+%            NewPosition) of
+
+%         {atomic, ok} ->
+%             Response = {move_ack,
+%                         NewPosition};
+
+%         {atomic, {error, Reason}} ->
+%             Response = {move_denied,
+%                         Reason};
+
+%         {aborted, Reason} ->
+%             Response = {error,
+%                         {database_error, Reason}}
+%     end,
+
+%     gen_tcp:send(
+%       Socket,
+%       term_to_binary(Response));
+
+handle_request(Socket, {moved, RobotId, NewPosition}) ->
     io:format(
         "Robot ~p moved to ~p~n",
         [RobotId, NewPosition]
     ),
 
-    case robo_mnesia:move_robot(
-        RobotId,
-        NewPosition
-    ) of
+    case robo_mnesia:move_robot(RobotId, NewPosition) of
+        {atomic, {ok, moved}} ->
+            Response = {move_ack, NewPosition};
 
-        {atomic, ok} ->
-            Response = {
-                move_ack,
-                NewPosition
-            };
+        {atomic, {ok, goal_reached}} ->
+            io:format(
+                "Robot ~p reached its goal.~n",
+                [RobotId]
+            ),
+            Response = {goal_reached, NewPosition};
 
         {atomic, {error, Reason}} ->
-            Response = {
-                move_denied,
-                Reason
-            };
+            Response = {move_denied, Reason};
 
         {aborted, Reason} ->
-            Response = {
-                error,
-                {database_error, Reason}
-            }
+            Response = {error, {database_error, Reason}}
     end,
 
-    gen_tcp:send(
-        Socket,
-        term_to_binary(Response)
-    );
+    gen_tcp:send(Socket, term_to_binary(Response));
 handle_request(Socket, {request_window, RobotId}) ->
     io:format(
-        "Robot ~p requested a window~n",
-        [RobotId]
-    ),
+      "Robot ~p requested a window~n",
+      [RobotId]),
 
     case robo_mnesia:get_next_window(RobotId, 3) of
         {atomic, {ok, Positions}} ->
             io:format(
-                "Reserved window for ~p: ~p~n",
-                [RobotId, Positions]
-            ),
+              "Reserved window for ~p: ~p~n",
+              [RobotId, Positions]),
 
             Response = {window, Positions};
 
         {atomic, {error, Reason}} ->
             io:format(
-                "Window denied for ~p: ~p~n",
-                [RobotId, Reason]
-            ),
+              "Window denied for ~p: ~p~n",
+              [RobotId, Reason]),
 
             Response = {window_denied, Reason};
 
         {aborted, Reason} ->
-            Response = {
-                error,
-                {database_error, Reason}
-            }
+            Response = {error,
+                        {database_error, Reason}}
     end,
 
     gen_tcp:send(
-        Socket,
-        term_to_binary(Response)
-    );
+      Socket,
+      term_to_binary(Response));
 handle_request(Socket, {register, RobotId, Current, Goal}) ->
     io:format(
-        "Registering robot ~p: ~p -> ~p~n",
-        [RobotId, Current, Goal]
-    ),
+      "Registering robot ~p: ~p -> ~p~n",
+      [RobotId, Current, Goal]),
 
     Obstacles = [],
 
     case robo_pathfinder:find_path(
-        Current,
-        Goal,
-        Obstacles
-    ) of
+           Current,
+           Goal,
+           Obstacles) of
         {ok, Path} ->
             io:format(
-                "Path for ~p: ~p~n",
-                [RobotId, Path]
-            ),
+              "Path for ~p: ~p~n",
+              [RobotId, Path]),
 
             Result = robo_mnesia:add_robot(
-                RobotId,
-                Current,
-                Goal,
-                Path
-            ),
+                       RobotId,
+                       Current,
+                       Goal,
+                       Path),
 
             case Result of
                 {atomic, ok} ->
                     Response = {register_ack, RobotId};
 
                 {aborted, Reason} ->
-                    Response = {
-                        error,
-                        {registration_failed, Reason}
-                    }
+                    Response = {error,
+                                {registration_failed, Reason}}
             end;
 
         {error, no_path} ->
-            Response = {
-                error,
-                no_path
-            }
+            Response = {error,
+                        no_path}
     end,
 
     gen_tcp:send(
-        Socket,
-        term_to_binary(Response)
-    );
+      Socket,
+      term_to_binary(Response));
 % handle_request(Socket, {moved, RobotId, Barcode}) ->
 %     io:format(
 %         "Robot ~p moved to ~p~n",
@@ -231,6 +228,5 @@ handle_request(Socket, Request) ->
     Response = {error, {unknown_request, Request}},
 
     gen_tcp:send(
-        Socket,
-        term_to_binary(Response)
-    ).
+      Socket,
+      term_to_binary(Response)).
